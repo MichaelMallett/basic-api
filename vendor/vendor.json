@@ -1,0 +1,41 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"path": "appengine/cloudsql",
+			"revision": ""
+		},
+		{
+			"checksumSHA1": "9fH2Wod5bN3E4GWNBFPVWPj25wM=",
+			"path": "github.com/go-chi/chi",
+			"revision": "0c5e7abb4e562fa14dd2548cb57b28f979a7dcd9",
+			"revisionTime": "2018-07-10T13:45:11Z"
+		},
+		{
+			"checksumSHA1": "1Xlo4sCR+zeOzjslXc/NAOmkgXg=",
+			"path": "github.com/go-chi/chi/middleware",
+			"revision": "0c5e7abb4e562fa14dd2548cb57b28f979a7dcd9",
+			"revisionTime": "2018-07-10T13:45:11Z"
+		},
+		{
+			"checksumSHA1": "Uxtuf0yrw6/aMBgPMj1JZRRllBY=",
+			"path": "github.com/go-chi/render",
+			"revision": "3215478343fbc559bd3fc08f7031bb134d6bdad5",
+			"revisionTime": "2018-05-31T15:06:17Z"
+		},
+		{
+			"checksumSHA1": "k9izYoyobR8Upb3Yjsw9htgE/Mk=",
+			"path": "github.com/go-sql-driver/mysql",
+			"revision": "99ff426eb706cffe92ff3d058e168b278cabf7c7",
+			"revisionTime": "2018-07-19T07:19:42Z"
+		},
+		{
+			"checksumSHA1": "LiyXfqOzaeQ8vgYZH3t2hUEdVTw=",
+			"path": "google.golang.org/appengine/cloudsql",
+			"revision": "b1f26356af11148e710935ed1ac8a7f5702c7612",
+			"revisionTime": "2018-05-21T22:34:13Z"
+		}
+	],
+	"rootPath": "gitlab.com/fairfax-api"
+}
