@@ -1,0 +1,15 @@
+version: "2"
+
+services:
+  app:
+    image: golang:1.9-alpine
+    volumes:
+      - .:/go/src/fairfax-api
+    working_dir: /go/src/fairfax-api
+    command: go run main.go
+  db:
+    image: mysql
+    command: --default-authentication-plugin=mysql_native_password
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password
