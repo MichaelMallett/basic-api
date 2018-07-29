@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -29,21 +30,60 @@ type Tags struct {
 	RelatedTags []string `json:"related_tags"`
 }
 
+type ErrResponse struct {
+	Err            error `json:"-"` // low-level runtime error
+	HTTPStatusCode int   `json:"-"` // http response status code
+
+	StatusText string `json:"status"`          // user-level status message
+	AppCode    int64  `json:"code,omitempty"`  // application-specific error code
+	ErrorText  string `json:"error,omitempty"` // application-level error message, for debugging
+}
+
+func ErrServerSide(err error) render.Renderer {
+	log.Fatal(err)
+	return &ErrResponse{
+		Err:            err,
+		HTTPStatusCode: 500,
+		StatusText:     "Server Error",
+		ErrorText:      err.Error(),
+	}
+}
+
+func ErrInvalidRequest(err error) render.Renderer {
+	return &ErrResponse{
+		Err:            err,
+		HTTPStatusCode: 400,
+		StatusText:     "Invalid request.",
+		ErrorText:      err.Error(),
+	}
+}
+
+func ErrRequiredField(name string) render.Renderer {
+	return &ErrResponse{
+		HTTPStatusCode: 400,
+		StatusText:     "Missing field",
+		ErrorText:      name + " is a required field.",
+	}
+}
+
+var ErrNotFound = &ErrResponse{HTTPStatusCode: 404, StatusText: "Resource not found."}
+
+func (e *ErrResponse) Render(w http.ResponseWriter, r *http.Request) error {
+	render.Status(r, e.HTTPStatusCode)
+	return nil
+}
+
 // Global database connection.
 var db *sql.DB
 
 func main() {
 	var err error
 	db, err = sql.Open("mysql",
-		"root:password@tcp(127.0.0.1:3308)/fairfax?parseTime=true")
+		"root:password@tcp(db:3306)/fairfax?parseTime=true")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	err = db.Ping()
-	if err != nil {
-		fmt.Println("Error")
-	}
 
 	r := chi.NewRouter()
 	r.Use(render.SetContentType(render.ContentTypeJSON))
@@ -79,24 +119,29 @@ func getArticle(w http.ResponseWriter, r *http.Request) {
 		"JOIN articles b ON tags_for_articles.article_id = b.id " +
 		"WHERE b.id = ? " +
 		"GROUP BY b.id")
+	defer stmt.Close()
 	if err != nil {
-		log.Fatal(err)
+		render.Render(w, r, ErrServerSide(err))
+		return
 	}
 	err = stmt.QueryRow(id).Scan(&tagString, &articleId, &title, &body, &date)
 	if err != nil {
-		log.Fatal(err)
+		render.Render(w, r, ErrNotFound)
+		return
 	}
-	defer stmt.Close()
 
 	// I could get this in a seperate query straight to an array, but I have always
 	// tried to 'get the database to do the work', so I err towards joins. In production
-	// I would probably benchmark something like this.
+	// I would probably benchmark something like this and see what's better maybe?
 	tags := strings.Split(tagString, ",")
 
 	// I don't know if there's a better way to do this, but this seems a bit messy.
 	// Get datetime from sql, parse it to time object, format to string.
 	t, err := time.Parse(time.RFC3339, date)
-	fD := t.Format("02-03-2006")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fD := t.Format("02-01-2006")
 
 	responseObj := new(Article)
 	responseObj.Id = articleId
@@ -109,7 +154,69 @@ func getArticle(w http.ResponseWriter, r *http.Request) {
 }
 
 func createArticle(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Create Article"))
+	var t Article
+	var tagId int
+	var tagIds []int
+	var tagTitle string
+	var insertTagId int64
+	var newArticleId int64
+
+	err := json.NewDecoder(r.Body).Decode(&t)
+	if err != nil {
+		render.Render(w, r, ErrInvalidRequest(err))
+		return
+	}
+
+	t.Date = time.Now().Format("2006-01-02")
+	fmt.Printf("%T", t.Date)
+
+	// Deal with new tags first.
+	// I'm really not that keen on doing so many select queries, ideally would cache
+	// a list of tags to check against, perhaps a static file, but this was the lesser of
+	// the evils I tried.
+	tx, err := db.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, ti := range t.Tags {
+		db.QueryRow("SELECT id, title FROM tags WHERE title = ?", ti).Scan(&tagId, &tagTitle)
+		if ti == tagTitle {
+			tagIds = append(tagIds, tagId)
+		} else {
+			res, err := tx.Exec("INSERT INTO tags (title) VALUES (?)", ti)
+			if err != nil {
+				tx.Rollback()
+				render.Render(w, r, ErrServerSide(err))
+				return
+			}
+			// Add to tags slice, we need this later.
+			insertTagId, _ = res.LastInsertId()
+			// I do a type conversion here, which I think is probably a bad thing to do.
+			tagIds = append(tagIds, int(insertTagId))
+		}
+	}
+
+	res, err := tx.Exec("INSERT INTO articles (title, body, date) VALUES (?, ?, ?)", t.Title, t.Body, t.Date)
+	if err != nil {
+		tx.Rollback()
+		render.Render(w, r, ErrServerSide(err))
+		return
+	}
+	newArticleId, _ = res.LastInsertId()
+
+	for _, tid := range tagIds {
+		_, err = tx.Exec("INSERT INTO tags_for_articles (article_id, tag_id) VALUES (?, ?)", newArticleId, tid)
+		if err != nil {
+			tx.Rollback()
+			render.Render(w, r, ErrServerSide(err))
+			return
+		}
+	}
+
+	// Presumably if we've managed to get here then the queries were fine.
+	t.Id = int(newArticleId)
+	tx.Commit()
+	render.JSON(w, r, t)
 
 }
 
@@ -128,12 +235,15 @@ func getTaggedArticles(w http.ResponseWriter, r *http.Request) {
 	}
 	dateFm := dateObj.Format("2006-01-02")
 
+	fmt.Println(title)
+	fmt.Println(dateFm)
 	rows, err := db.Query("SELECT article_id FROM tags_for_articles a "+
 		"LEFT JOIN tags b ON a.tag_id = b.id "+
 		"LEFT JOIN articles c ON a.article_id = c.id "+
 		"WHERE b.title = ? AND c.date = ?", title, dateFm)
+
 	if err != nil {
-		log.Fatal(err)
+		render.Render(w, r, ErrServerSide(err))
 	}
 	for rows.Next() {
 		err := rows.Scan(&artId)
@@ -145,17 +255,19 @@ func getTaggedArticles(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 
 	if len(artIds) == 0 {
-		log.Fatal(err)
+		render.Render(w, r, ErrNotFound)
+		return
 	}
-
-	rows, err = db.Query("SELECT DISTINCT title FROM tags_for_articles "+
-		"LEFT JOIN tags ON tags.id = tags_for_articles.tag_id "+
-		"WHERE article_id IN (?)", strings.Join(artIds, ","))
+	inq := strings.Join(artIds, ",")
+	sql := fmt.Sprintf("SELECT DISTINCT title FROM tags_for_articles LEFT JOIN tags ON tags.id = tags_for_articles.tag_id WHERE article_id IN (%s)", inq)
+	rows, err = db.Query(sql)
 	if err != nil {
+		render.Render(w, r, ErrNotFound)
 		log.Fatal(err)
 	}
 	for rows.Next() {
 		err := rows.Scan(&tagTitle)
+		// fmt.Println(tagTitle)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -169,6 +281,5 @@ func getTaggedArticles(w http.ResponseWriter, r *http.Request) {
 	responseObj.Articles = artIds
 	responseObj.RelatedTags = tags
 
-	w.Write([]byte("Get Tagged Articles"))
 	render.JSON(w, r, responseObj)
 }
