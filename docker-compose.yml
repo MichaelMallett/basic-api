@@ -1,14 +1,16 @@
-version: "2"
+version: "3"
 
 services:
   app:
-    image: golang:1.9-alpine
+    build: .
     volumes:
       - .:/go/src/fairfax-api
     working_dir: /go/src/fairfax-api
-    command: go run main.go
+    command: realize start
     ports:
       - 3000:3000
+    links:
+      - db
   db:
     image: mysql
     command: --default-authentication-plugin=mysql_native_password
