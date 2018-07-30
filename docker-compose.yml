@@ -1,0 +1,24 @@
+version: "3"
+
+services:
+  app:
+    build: .
+    volumes:
+      - .:/go/src/fairfax-api
+    working_dir: /go/src/fairfax-api
+    command: realize start
+    ports:
+      - 3000:3000
+    links:
+      - db
+  db:
+    image: mysql
+    command: --default-authentication-plugin=mysql_native_password
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=fairfax
+    volumes:
+      - .db_dump:/docker-entrypoint-initdb.d
+    ports:
+      - 3308:3306
