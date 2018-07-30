@@ -179,7 +179,14 @@ func getTaggedArticles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inq := strings.Join(artIds, ",")
-	sql := fmt.Sprintf("SELECT DISTINCT title FROM tags_for_articles LEFT JOIN tags ON tags.id = tags_for_articles.tag_id WHERE article_id IN (%s)", inq)
+	// This is the string substitution I mention in the wiki.
+	// It doesn't feel right, but I've spoken to other gophers who
+	// say that as long as the injection is not possible it's fine.
+	sql := fmt.Sprintf("SELECT DISTINCT tags.title FROM tags_for_articles "+
+		"LEFT JOIN tags ON tags.id = tags_for_articles.tag_id "+
+		"LEFT JOIN articles ON tags_for_articles.tag_id = articles.id "+
+		"WHERE date = \"%s\" AND articles.id IN (%s)", dateFm, inq)
+	fmt.Println(sql)
 	rows, err = db.Query(sql)
 	if err != nil {
 		render.Render(w, r, ErrNotFound)
@@ -190,6 +197,7 @@ func getTaggedArticles(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Fatal(err)
 		}
+		fmt.Println(tagTitle)
 		tags = append(tags, tagTitle)
 	}
 	rows.Close()
