@@ -1,6 +1,6 @@
 # fairfax-api
 
-Golang technical test for Fairfax. 
+Golang technical test.
 
 From the project root, run `docker-compose -f .docker/prod/docker-compose.yml up`
 
